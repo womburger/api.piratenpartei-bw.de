@@ -14,7 +14,6 @@ APP::import('Model', 'WikiPage');
 /**
  * Parses a certain WikiPage of a special format and renders its
  * content into a JavaScript file.
- * @author gnuheidix
  */
 class Stammtisch extends AppModel{
     public $name = 'Stammtisch';
@@ -38,7 +37,8 @@ class Stammtisch extends AppModel{
         if(is_writable($destination)
             && (
                 time() - filemtime($destination) > $maxage
-                || filesize($destination) === 0
+                || filesize($destination) < 50
+                || defined('CRON_DISPATCHER')
             )
         ){
             // try to prevent other processes to update
@@ -69,7 +69,6 @@ class Stammtisch extends AppModel{
                 $html = preg_replace($rowEndSource, $rowEndDestination, $html);
                 $html = preg_replace($colSepSource, $colSepDestination, $html);
             }
-            
             // parse the HTML table 
             while($html !== FALSE){
                 $beginBlock = strpos($html, $rowBeginDestination);
@@ -196,16 +195,15 @@ class Stammtisch extends AppModel{
                 && empty($dataset['lon'])
                 && Configure::read('Stammtisch.geolocationQueryEnabled')
             ){
-                $coordinates = $this->osmGeoCoordinates(
+                $geoCoordModel = ClassRegistry::init('GeoCoordinate');
+                $coordinates = $geoCoordModel->getCoordinates(
                     $dataset['strasse']
                     ,$dataset['plz']
                     ,$dataset['ort']
                 );
-                if(!empty($coordinates['lat'])
-                    && !empty($coordinates['lon'])
-                ){
-                    $dataset['lat'] = $coordinates['lat'];
-                    $dataset['lon'] = $coordinates['lon'];
+                if(!empty($coordinates)){
+                    $dataset['lat'] = $coordinates['GeoCoordinate']['lat'];
+                    $dataset['lon'] = $coordinates['GeoCoordinate']['lon'];
                 }
             }
         }
@@ -213,43 +211,10 @@ class Stammtisch extends AppModel{
     }
     
     /**
-     * Retrieves geo coordinates from OpenStreetMap for a certain address.
-     * @param string $street The street of the address to geocode.
-     * @param string $postcode The postcode of the address to geocode.
-     * @param string $town The town name of the address to geocode.
-     */
-    protected function osmGeoCoordinates($street, $postcode, $town){
-        $retval = array();
-        $requestPath = Configure::read('Stammtisch.geolocationNominatimInstanceUrl')
-            .'?format=json'
-            .'&countrycodes=de'
-            .'&limit=1'
-            .'&addressdetails=0'
-            .'&email='.urlencode(Configure::read('Stammtisch.geolocationContactAddress'))
-            .'&q='.urlencode($street.', '.$postcode.', '.$town)
-        ;
-        $result = file_get_contents(
-            $requestPath
-            ,false
-            ,$this->streamContext
-        );
-        if($result){
-            $decodedResult = json_decode($result, true);
-            if(!empty($decodedResult[0]['lat'])
-                && !empty($decodedResult[0]['lon'])
-            ){
-                $retval['lat'] = $decodedResult[0]['lat'];
-                $retval['lon'] = $decodedResult[0]['lon'];
-            }
-        }
-        return $retval;
-    }
-    
-    /**
      * (non-PHPdoc)
      * @see Model::afterFind()
      */
-    public function afterFind($results){
+    public function afterFind($results, $primary = false){
         foreach($results as $key => $val){
             if(!empty($val['Stammtisch']['data'])){
                 $results[$key]['Stammtisch']['data'] = json_decode($val['Stammtisch']['data'], true);
